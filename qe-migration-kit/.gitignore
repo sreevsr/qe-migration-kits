@@ -1,0 +1,18 @@
+# Build output — rebuilt by `orchestrate.mjs setup` on any machine. Never commit these.
+tools/extractor/target/
+tools/*/node_modules/
+node_modules/
+
+# Per-run working dirs: absolute machine paths inside records.json/ledger. Never portable.
+run-*/
+*-run/
+migration-packs/
+migration-ledger.json
+migration-run-report.json
+batch.json
+cp.txt
+
+# Local noise
+.DS_Store
+Thumbs.db
+*.log

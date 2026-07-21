@@ -1,0 +1,2 @@
+{ "name": "qe-migration-orchestrator", "version": "1.0.0", "type": "module",
+  "bin": { "qe-orchestrate": "orchestrate.mjs" } }
