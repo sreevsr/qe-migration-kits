@@ -23,6 +23,7 @@ import path from "path";
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
 const ORACLES = opt("--oracles", "records.json");
+const EMIT = opt("--emit", "");   // when set, write per-test verdicts + headline as JSON
 // --bdd: score generated playwright-bdd STEP DEFINITIONS (Given/When/Then) instead of test() blocks.
 // Everything else — call following, assertion matching, must-pin scoring, verdicts — is IDENTICAL
 // and shared with the TestNG path. The oracles file is the same schema (the same extractor emits it,
@@ -239,6 +240,7 @@ const isShared = (a) => a.containing && (reachedBy.get(a.containing)?.size || 0)
 const records = JSON.parse(fs.readFileSync(ORACLES, "utf8"));
 let mpTotal = 0, mpFound = 0, unscoreableTotal = 0;
 const verdicts = { PASS: 0, "NEEDS-HUMAN": 0, BLOCK: 0 };
+const emitRows = [];   // structured mirror of each printed verdict row, for --emit
 const outOfScope = { deferred: [], skipped: [] };
 const sharedBucket = new Map();  // "file:line" -> {text, tests:Set, chain}
 
@@ -263,6 +265,7 @@ for (const r of records) {
   const g = bySource.get(r.id);
   const notes = [];
   if (!g) { const v = mp.length ? "BLOCK" : "NEEDS-HUMAN"; verdicts[v]++;
+    emitRows.push({ id: r.id, mpFound: 0, mpTotal: mp.length, perTest: null, oracleCount: r.oracle_count, verdict: v, notes: [`no generated ${BDD ? "step definition" : "test"} (check @source tag)`] });
     console.log(`${r.id.padEnd(46)}${("0/" + mp.length).padStart(9)}${"-".padStart(9)}  ${v.padEnd(11)} no generated ${BDD ? "step definition" : "test"} (check @source tag)`); continue; }
 
   for (const a of g.assertions) a.shared = isShared(a);
@@ -329,6 +332,7 @@ for (const r of records) {
   if (sharedUntraced.length) notes.push(`(+${sharedUntraced.length} shared, attributed once)`);
 
   verdicts[verdict]++;
+  emitRows.push({ id: r.id, mpFound: found, mpTotal: mp.length, perTest: perTest.length, oracleCount: r.oracle_count, verdict, notes: [...notes] });
   console.log(`${r.id.padEnd(46)}${(found + "/" + mp.length).padStart(9)}${(perTest.length + "/" + r.oracle_count).padStart(9)}  ${verdict.padEnd(11)} ${notes.join("; ")}`);
 }
 
@@ -352,5 +356,19 @@ if (SCOPE) {
   if (outOfScope.deferred.length) console.log(`  DEFERRED (not migrated yet \u2014 a later batch): ${[...new Set(outOfScope.deferred.map(x => SCOPE.methodLevel ? x : classOf(x)))].join(", ")}`);
   for (const sk of outOfScope.skipped) console.log(`  SKIPPED  ${sk.id} \u2014 ${sk.reason}`);
   console.log(`  The must-pin recovery above covers everything migrated SO FAR (this batch + earlier batches).`);
+}
+if (EMIT) {
+  const payload = {
+    mode: BDD ? "bdd" : "testng",
+    headline: { mpFound, mpTotal, rate, unscoreable: unscoreableTotal,
+      verdicts: { PASS: verdicts.PASS, "NEEDS-HUMAN": verdicts["NEEDS-HUMAN"], BLOCK: verdicts.BLOCK },
+      tests: testCount, untagged, followed: stats.followed, blind: stats.blind, maxDepth: stats.maxDepth },
+    tests: emitRows,
+    sharedHelpers: [...sharedBucket].map(([loc, v]) => ({ loc, tests: v.tests.size, text: v.text })),
+    scope: SCOPE ? { deferred: [...new Set(outOfScope.deferred.map(x => SCOPE.methodLevel ? x : classOf(x)))],
+      skipped: outOfScope.skipped.map(s => ({ id: s.id, reason: s.reason })), already: [...SCOPE.already] } : null,
+  };
+  try { fs.writeFileSync(EMIT, JSON.stringify(payload, null, 2)); console.log(`\n(verdicts written to ${EMIT})`); }
+  catch (e) { console.error(`could not write --emit ${EMIT}: ${e.message}`); }
 }
 console.log(`\nStatic gate only. Dynamic gate (${BDD ? "npx bddgen + " : ""}npx tsc --noEmit + npx playwright test) remains the definitive backstop.`);
