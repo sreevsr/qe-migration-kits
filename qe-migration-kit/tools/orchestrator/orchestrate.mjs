@@ -390,6 +390,10 @@ function report() {
 
   const PWDIR = CFG.pw || PW_PROJECT || "";
   const PEND  = (what) => `_— agent note pending (${what}) —_`;
+  // Escape HTML-significant chars in AGENT-supplied free text so tags like <a>/<frameset> render
+  // literally instead of being parsed as HTML by markdown viewers. Leaves `inline code` spans intact.
+  const esc = (s) => String(s ?? "").split(/(`[^`]*`)/).map((seg, i) =>
+    i % 2 ? seg : seg.replace(/</g, "&lt;").replace(/>/g, "&gt;")).join("");
   const classOf = (id) => { const i = id.lastIndexOf("."); return i > 0 ? id.slice(0, i) : id; };
 
   // §1 intake, computed from records.json (read the JSON, not the printed line)
@@ -409,7 +413,7 @@ function report() {
 
   const gate = rep.gate || (verdicts && verdicts.headline ? { pass: verdicts.headline.verdicts.PASS, needsHuman: verdicts.headline.verdicts["NEEDS-HUMAN"], block: verdicts.headline.verdicts.BLOCK, mpFound: verdicts.headline.mpFound, mpTotal: verdicts.headline.mpTotal } : null);
   const pwRun = rep.playwright || null;
-  const outcome = notes.outcome || (gate && gate.block === 0 && pwRun && pwRun.failed === 0 ? "COMPLETE — all intent preserved" : "INCOMPLETE — see gate/Playwright below");
+  const outcome = notes.outcome ? esc(notes.outcome) : (gate && gate.block === 0 && pwRun && pwRun.failed === 0 ? "COMPLETE — all intent preserved" : "INCOMPLETE — see gate/Playwright below");
   const fmt = (iso) => iso ? iso.replace("T", " ").slice(0, 16) + " UTC" : "?";
   const durMin = (rep.started && rep.finished) ? Math.round((Date.parse(rep.finished) - Date.parse(rep.started)) / 60000) : null;
   const suiteName = CFG.suite ? path.basename(CFG.suite) : (SUITE ? path.basename(SUITE) : "(suite)");
@@ -417,13 +421,13 @@ function report() {
   const L = [];
   L.push(`# Migration Run Report — ${suiteName} (Java+Selenium+TestNG → Playwright+TypeScript)\n`);
   L.push(`**Suite:** \`${suiteName}\``);
-  L.push(`**Type:** ${notes.type || "web"}`);
+  L.push(`**Type:** ${notes.type ? esc(notes.type) : "web"}`);
   L.push(`**Date:** ${fmt(rep.started)}${rep.finished ? " – " + fmt(rep.finished).slice(11) : ""}`);
   if (durMin != null) L.push(`**Duration:** ~${durMin} min (agent wall-clock)`);
   L.push(`**Outcome:** ${outcome}`);
   if (gate) { L.push(`**Must-pin recovery:** **${gate.mpFound}/${gate.mpTotal}**`); L.push(`**Gate:** ${gate.pass} PASS · ${gate.needsHuman} NEEDS-HUMAN · ${gate.block} BLOCK`); }
   if (pwRun) L.push(`**Playwright:** ${pwRun.passed}/${pwRun.passed + pwRun.failed} passing`);
-  L.push(`**Key fix:** ${notes.keyFix || PEND("header key-fix summary")}\n`);
+  L.push(`**Key fix:** ${notes.keyFix ? esc(notes.keyFix) : PEND("header key-fix summary")}\n`);
   L.push(`> **How to read this report.** A migration is judged on one thing: did every check the source made survive into the target? **Must-pin recovery ${gate ? gate.mpFound + "/" + gate.mpTotal : "X/Y"} with ${gate ? gate.block : 0} BLOCK is that answer — nothing irreplaceable was lost.** NEEDS-HUMAN items are not failures; they are places the deterministic gate could not *score* a faithful translation and asks a human to confirm by eye. Each is explained in §4.`);
   L.push("\n---\n");
 
@@ -440,14 +444,14 @@ function report() {
   L.push(`| \`app_read\` | ${byOrigin.app_read} | A live fact about the page, re-read at runtime | derive → NEEDS-HUMAN |`);
   L.push(`| \`literal\` | ${byOrigin.literal} | Compared against a hardcoded string/number | derive → NEEDS-HUMAN |`);
   L.push(`| \`unknown\` | ${byOrigin.unknown} | Origin could not be traced | REVIEW (pinned, fail-safe) |`);
-  L.push(`\n**Localization check (the \`literal = ${byOrigin.literal}\` line).** ${notes.localization || PEND("localization judgment on the hardcoded-string oracles")}`);
+  L.push(`\n**Localization check (the \`literal = ${byOrigin.literal}\` line).** ${notes.localization ? esc(notes.localization) : PEND("localization judgment on the hardcoded-string oracles")}`);
   L.push("\n---\n");
 
   L.push(`## 2. Intake Attestation (HARD-STOP 1)\n`);
   const att = notes.attestation || {};
-  L.push(`- **Attested:** ${att.attested || PEND("intake attestation")}`);
-  L.push(`- **Baseline:** ${att.baseline || (rep.baseline ? `${rep.baseline.tests != null ? (rep.baseline.tests - rep.baseline.failed) + "/" + rep.baseline.tests + " passed" : "recorded"}` : "not run — attested instead")}`);
-  L.push(`- **Proceed decision:** ${att.proceed || PEND("proceed decision")}`);
+  L.push(`- **Attested:** ${att.attested ? esc(att.attested) : PEND("intake attestation")}`);
+  L.push(`- **Baseline:** ${att.baseline ? esc(att.baseline) : (rep.baseline ? `${rep.baseline.tests != null ? (rep.baseline.tests - rep.baseline.failed) + "/" + rep.baseline.tests + " passed" : "recorded"}` : "not run — attested instead")}`);
+  L.push(`- **Proceed decision:** ${att.proceed ? esc(att.proceed) : PEND("proceed decision")}`);
   L.push("\n---\n");
 
   L.push(`## 3. What was migrated\n`);
@@ -465,7 +469,7 @@ function report() {
     L.push(`The gate re-reads both sides and scores whether each oracle survived. **must-pin ${gate.mpFound}/${gate.mpTotal} · ${gate.block} BLOCK.** ${nonPass.length ? "The " + nonPass.length + " non-PASS row(s) are explained below." : "Every test passed."}\n`);
     if (nonPass.length) {
       L.push(`| Source test | must-pin | verdict | Why (not a loss) |`); L.push(`|---|---|---|---|`);
-      for (const t of nonPass) { const reason = (notes.verdictReasons && notes.verdictReasons[t.id]) || t.notes.join("; ") || PEND("reason"); L.push(`| ${t.id} | ${t.mpFound}/${t.mpTotal} | ${t.verdict} | ${reason} |`); }
+      for (const t of nonPass) { const raw = (notes.verdictReasons && notes.verdictReasons[t.id]) || t.notes.join("; "); const reason = raw ? esc(raw) : PEND("reason"); L.push(`| ${t.id} | ${t.mpFound}/${t.mpTotal} | ${t.verdict} | ${reason} |`); }
       const missingHuman = nonPass.some(t => !(notes.verdictReasons && notes.verdictReasons[t.id]));
       if (missingHuman) L.push(`\n_Rows without a written explanation show the gate's mechanical note; add human elaboration via notes.json → verdictReasons before hand-off._`);
       L.push("");
@@ -481,7 +485,7 @@ function report() {
     if (violation) L.push(`> ⚠ **A recorded fix reports \`assertionsTouched: true\`.** Under HARD-STOP 3 rule 2 an interaction fix must NOT touch an assertion — review before hand-off.\n`);
     L.push(`No assertion was altered${violation ? " except where flagged" : ""}.\n`);
     L.push(`| # | File | Change | Cause (verified) | Assertions |`); L.push(`|---|---|---|---|---|`);
-    fixes.forEach((f, i) => L.push(`| ${i + 1} | \`${f.file || "?"}\` | ${f.change || "?"} | ${f.cause || "?"}${f.evidence ? " — " + f.evidence : ""} | ${f.assertionsTouched ? "**TOUCHED ⚠**" : "untouched"} |`));
+    fixes.forEach((f, i) => L.push(`| ${i + 1} | \`${f.file ? esc(f.file) : "?"}\` | ${f.change ? esc(f.change) : "?"} | ${f.cause ? esc(f.cause) : "?"}${f.evidence ? " — " + esc(f.evidence) : ""} | ${f.assertionsTouched ? "**TOUCHED ⚠**" : "untouched"} |`));
   } else L.push(`None recorded.${(rep.steps || []).some(s => s.step === "playwright" && s.status === "FAILED") ? " _(A Playwright cycle failed then recovered — if a fix was applied it should be in fixes.json.)_" : ""}`);
   L.push("\n---\n");
 
@@ -495,14 +499,14 @@ function report() {
     cycles.forEach((c, i) => {
       const cell = (s) => s ? `${s.status === "ok" ? "✅" : "❌"} ${s.seconds || "?"}s` : "—";
       const pwOut = c.playwright && c.playwright.passed !== undefined ? (c.playwright.failed ? `${c.playwright.failed} failing` : `${c.playwright.passed}/${c.playwright.passed} passing`) : "";
-      const reason = (notes.cycleReasons && notes.cycleReasons[i]) || "";
+      const reason = esc((notes.cycleReasons && notes.cycleReasons[i]) || "");
       L.push(`| ${i + 1} | ${cell(c.gate)} | ${cell(c.tsc)} | ${cell(c.playwright)} | ${[pwOut, reason].filter(Boolean).join(" — ") || "—"} |`);
     });
   } else L.push(`(single cycle — no fix-loop recorded)`);
   L.push("\n---\n");
 
   L.push(`## 7. Findings about the customer's system\n`);
-  if (notes.findings && notes.findings.length) for (const f of notes.findings) L.push(`- ${f}`); else L.push(`- ${PEND("customer-system findings")}`);
+  if (notes.findings && notes.findings.length) for (const f of notes.findings) L.push(`- ${esc(f)}`); else L.push(`- ${PEND("customer-system findings")}`);
   if (verdicts && verdicts.headline) L.push(`- **Blind spots:** ${verdicts.headline.blind === 0 ? "none — every page object and helper was followed" : verdicts.headline.blind + " (calls the gate could not follow)"}.`);
   L.push("\n---\n");
 

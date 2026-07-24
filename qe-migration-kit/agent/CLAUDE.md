@@ -110,7 +110,22 @@ require anyone to retype an absolute path.
    Then apply the full rule in "HARD-STOP 3 in detail" below — it defines the ONLY case in which you
    may fix and continue without asking. Never regenerate everything. Do not act on this line alone.
 
-6. **Report (tool).** `node <KIT>/tools/orchestrator/orchestrate.mjs report --out <WORK>`.
+6. **Record as you go — MANDATORY before you run `report`.** The report renders two files from
+   `work/`; leaving them unwritten ships a deliverable that hides your fixes and judgment. You MUST
+   write both before reporting:
+   - `work/fixes.json` — a JSON array; one entry per HARD-STOP 3 interaction fix you applied:
+     `{ "file", "change", "cause", "evidence", "assertionsTouched": false }`. `assertionsTouched`
+     must be `false` (a HARD-STOP 3 fix never alters an assertion; the report flags `true` as a
+     rule-2 violation). If you applied no fixes, write `[]`.
+   - `work/notes.json` — a JSON object with your judgment: `keyFix` (one-line summary, or ""),
+     `attestation` `{ "attested", "baseline", "proceed" }` (what you confirmed at intake HARD-STOP 1),
+     `localization` (your call on any hardcoded-string oracles), `verdictReasons`
+     `{ "<test-or-stepdef-id>": "why this non-PASS gate row is not a loss" }` for each NEEDS-HUMAN row
+     you eye-verified, `cycleReasons` (array; the failure reason per validate cycle), and `findings`
+     (array of observations about the customer's system).
+   This is not optional cleanup — it is how the report captures what you did and decided.
+
+7. **Report (tool).** `node <KIT>/tools/orchestrator/orchestrate.mjs report --out <WORK>`.
    Summarize: gate verdicts, playwright pass/fail, and any residuals.
 
 ## Batching a large engagement (300+ tests)
