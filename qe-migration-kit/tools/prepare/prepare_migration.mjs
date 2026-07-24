@@ -180,7 +180,7 @@ let po = (ALREADY.length
     + `> and the gate re-verifies those specs on every batch. Use this only to look something up.\n\n`
   : `# Migration Pack 00 — Abstraction Layer (migrate ONCE, first)\n\n`)
   + `These are the non-test classes: base, page objects, components, data objects, API helpers,\n`
-  + `utils. Migrate them to Playwright + TypeScript page objects FIRST, following contracts/helper_contract.md.\n`
+  + `utils. Migrate them to Playwright + TypeScript page objects FIRST, following the translation contract in your agent instructions.\n`
   + `The test packs below assume these already exist. Keep the same class/method names so the tests line up.\n`;
 for (const p of layer) po += fileBlock(p);
 fs.writeFileSync(path.join(OUT, "00_page_objects.md"), po);
@@ -194,7 +194,7 @@ for (const [cls, recs] of byClass) {
   if (!file) continue;
   let md = `# Migration Pack — ${cls}\n\n`
     + `Translate this ONE test class to a Playwright + TypeScript spec, following\n`
-    + `contracts/helper_contract.md and reusing the page objects from pack 00.\n\n`
+    + `the translation contract in your agent instructions and reusing the page objects from pack 00.\n\n`
     + `## Oracles to PRESERVE (the extractor pinned these — do not drop or invent)\n`;
   let mp = 0, tot = 0;
   for (const r of recs) {

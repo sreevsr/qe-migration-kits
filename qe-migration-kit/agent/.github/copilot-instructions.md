@@ -252,17 +252,17 @@ not to re-derive what to test.
 - **Structure:** one TS page-object class per Java page object; keep the same class and method
   names so specs and the parity gate line up. Constructor `constructor(private page: Page) {}`.
   Fluent `return this` stays; page-transition methods return the migrated page object; UI methods `async`.
-- **Locators:** `By.id("x")`→`page.locator("#x")`; `By.cssSelector`→`page.locator(css)`;
+- **Locators:** `By.id("x")`→`page.locator("#x")`; `By.name("x")`→`page.locator("[name='x']")`; `By.cssSelector`→`page.locator(css)`;
   `By.xpath`→`page.locator("xpath=...")`; custom locator wrappers → resolve to the raw selector.
 - **Waits — DELETE, don't port:** remove `WebDriverWait`, `wait.until`, `Thread.sleep`, and
   retry/stale-element loops. Playwright auto-waits. Keep an `await expect(...).toBeVisible()` only
-  where it was an actual assertion.
+  where it was an actual assertion. `waitForUrlContains("/x")`→`await expect(page).toHaveURL(/x/)` (only if it was asserting).
 - **Actions:** `click()`→`click()`; `sendKeys`/`clear()+sendKeys`→`fill()`; `getText()`→
   `innerText()`; `driver.get`/`load()`→`page.goto(url)`; `Select.selectByVisibleText`→
   `selectOption({label})`.
 - **Assertions — preserve every oracle in the pack:** `assertEquals(a,"t")`→`expect(a).toBe("t")`
   or `toHaveText`; `assertTrue(x.contains(y))`→`expect(x).toContain(y)`/`toContainText`;
-  `assertEquals(list,exp)`→`toEqual`. **MUST-PIN oracles are non-negotiable** — every one must
+  `assertEquals(list,exp)`→`toEqual`; `assertTrue(cond)`→`expect(cond).toBeTruthy()`. **MUST-PIN oracles are non-negotiable** — every one must
   appear or the gate BLOCKs. **Computed oracles must be re-derived in TS** (build the expected value
   the same way; never freeze a computation to a literal). Preserve exact characters (e.g. curly
   quotes `“ ”`) — the live app may match on them.
@@ -271,7 +271,7 @@ not to re-derive what to test.
 - **API-driven setup → Playwright request context:** RestAssured calls → `request.post(url,{form,
   headers})` via `APIRequestContext`; Jackson (de)serialize → plain JS/JSON; cookie injection →
   `context.addCookies(...)` before `page.goto`; keep distinct request contexts if the Java used
-  distinct cookie jars.
+  distinct cookie jars. Keep the API calls as setup in a `beforeEach` or fixture, mirroring the Java `@BeforeMethod`.
 - **Secrets & config:** credentials, tokens, and base URLs come from `process.env.X` — NEVER
   write a secret into a committed file (`config.ts`, a spec, or `playwright.config.ts`). Add each
   key (no value) to `.env.example`; a hard-coded fallback is allowed only for genuinely public

@@ -47,6 +47,7 @@ Use Playwright's `expect`. Map by intent, and **every MUST-PIN oracle must appea
 | `Assert.assertEquals(list, expectedList)` | `expect(actualList).toEqual(expectedList)` |
 - A `computed` oracle (e.g. `"Search results: " + searchFor`, `subtotal.add(tax)`) MUST be
   re-derived in TS. A frozen numeric/string literal in place of a computation will BLOCK.
+- Preserve exact characters (e.g. curly quotes) — the live app may match on them.
 
 ## 6. Data providers → parameterized specs
 A `@Test(dataProvider=...)` with N rows → a `for (const row of ROWS) test(\`...${row}\`, ...)`
