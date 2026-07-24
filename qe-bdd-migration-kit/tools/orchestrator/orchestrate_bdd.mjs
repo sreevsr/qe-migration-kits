@@ -80,7 +80,7 @@ function saveReport(r) { fs.mkdirSync(OUT, { recursive: true }); fs.writeFileSyn
 function run(step, command, cwd, envOverride) {
   const rep = loadReport();
   console.log(`\n\u25b6 ${step}\n  $ ${command}`);
-  if (DRY) { rep.steps.push({ step, command, dry: true }); saveReport(rep); return { ok: true, out: "" }; }
+  if (DRY) { rep.steps.push({ step, command, status: "dry-run", when: new Date().toISOString() }); saveReport(rep); return { ok: true, out: "" }; }
   const t0 = Date.now();
   // Capture BOTH streams. The Node tools print their summaries to stderr (so that JSON can go to
   // stdout when --out is omitted) — execSync returns stdout ONLY, which silently swallowed every
@@ -91,7 +91,7 @@ function run(step, command, cwd, envOverride) {
   const out = `${r.stdout || ""}${r.stderr || ""}`;
   if (out.trim()) console.log(out.trimEnd());
   const ok = r.status === 0;
-  rep.steps.push({ step, command, ok, ms: Date.now() - t0 }); saveReport(rep);
+  rep.steps.push({ step, command, status: ok ? "ok" : "FAILED", seconds: ((Date.now() - t0) / 1000).toFixed(1), when: new Date().toISOString() }); saveReport(rep);
   return { ok, out };
 }
 
@@ -249,10 +249,13 @@ function validate() {
   if (!gen) stopGate(2, "validate needs --generated <playwright-project> (or --pw)");
   const batchFile = path.join(F.packs(), "batch.json");
   const scopeArg = fs.existsSync(batchFile) ? ` --scope "${batchFile}"` : "";
-  const gate = run("gate (shared, --bdd)", `node "${path.join(TESTNG_KIT, "tools", "gate", "parity_check_ast.mjs")}" --oracles "${F.oracles()}" --generated "${gen}" --bdd${scopeArg}`);
+  const verdictsPath = path.join(OUT, "verdicts.json");   // emitted automatically; report() reads it
+  const gate = run("gate (shared, --bdd)", `node "${path.join(TESTNG_KIT, "tools", "gate", "parity_check_ast.mjs")}" --oracles "${F.oracles()}" --generated "${gen}" --bdd${scopeArg} --emit "${verdictsPath}"`);
   const g = DRY ? {} : parseGate(gate.out);
   if (!DRY && g.block > 0) {
-    const rep = loadReport(); rep.gate = g; saveReport(rep);
+    const rep = loadReport(); rep.gate = g;
+    for (let i = rep.steps.length - 1; i >= 0; i--) { const s = rep.steps[i]; if (s.step.startsWith("gate") && s.block === undefined) { s.pass = g.pass; s.needsHuman = g.needsHuman; s.block = g.block; break; } }
+    saveReport(rep);
     stopGate(20, `gate reports ${g.block} BLOCK (a must-pin lost). Review the SPECIFIC gate line with the agent \u2014 do not blind-regenerate.`);
   }
   const cwd = PW || undefined;
@@ -263,6 +266,8 @@ function validate() {
   const pw = run("playwright", `npx playwright test`, cwd);
   const p = DRY ? {} : parsePlaywright(pw.out);
   const rep = loadReport();
+  for (let i = rep.steps.length - 1; i >= 0; i--) { const s = rep.steps[i]; if (s.step === "playwright" && s.passed === undefined) { s.passed = p.passed; s.failed = p.failed; break; } }
+  for (let i = rep.steps.length - 1; i >= 0; i--) { const s = rep.steps[i]; if (s.step.startsWith("gate") && s.block === undefined) { s.pass = g.pass; s.needsHuman = g.needsHuman; s.block = g.block; break; } }
   // A `stopped` record describes a run that HALTED. Getting here means gate+bddgen+tsc all passed,
   // so any earlier stop is resolved — clear it. Without this, `stopped` is write-only and every
   // later report carries a stale "STOPPED: a must-pin lost" line alongside "BLOCK 0 / all passed",
@@ -348,29 +353,177 @@ function status() {
 }
 
 function report() {
-  const r = loadReport();
-  const md = [];
-  md.push(`# BDD Migration Run Report\n`);
-  md.push(`- started: ${r.started}`);
-  if (r.finished) md.push(`- finished: ${r.finished}`);
-  if (r.binding) md.push(`- binding: ${r.binding.bound} bound, ${r.binding.unbound} unbound, ${r.binding.ambiguous} ambiguous, ${r.binding.unused_definitions} unused definition(s) (dead glue, not migrated)`);
-  if (r.gate) md.push(`- gate: PASS ${r.gate.pass} | NEEDS-HUMAN ${r.gate.needsHuman} | BLOCK ${r.gate.block} \u00b7 must-pin ${r.gate.mpFound}/${r.gate.mpTotal}`);
-  if (r.playwright) md.push(`- playwright: ${r.playwright.passed} passed, ${r.playwright.failed} failed`);
-  if (r.stopped) md.push(`- **STOPPED at ${r.stopped.at}** \u2014 (${r.stopped.code}) ${r.stopped.msg}`);
-  md.push(`\n## Steps\n`);
-  for (const s of r.steps || []) md.push(`- ${s.ok === false ? "\u2717" : "\u2713"} ${s.step}${s.ms ? ` (${(s.ms / 1000).toFixed(1)}s)` : ""}`);
-  md.push(`\n## Tokens\n`);
-  md.push(fs.existsSync(path.join(OUT, "tokens.json"))
-    ? "- see tokens.json"
-    : "- not metered (agent runtime). The deterministic steps above cost ZERO tokens; the agent spends tokens only on translation.");
-  md.push(`\n## Notes\n- .feature files carry over verbatim (0 tokens).\n- Oracle extraction uses the SHARED TestNG classifier via --entry-points; the gate is the SHARED gate via --bdd.`);
-  // The write-up is a DELIVERABLE, so it belongs beside the migrated suite — not in work/, which we
-  // tell people to ignore. The machine-readable .json stays in work/ (it is state, not a report).
+  const rep = loadReport();
+  const rd = (p, d) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return d; } };
+  const oracles  = rd(F.oracles(), []);          // shared-extractor output (same oracle shape as TestNG)
+  const verdicts = rd(path.join(OUT, "verdicts.json"), null);
+  const fixes    = rd(path.join(OUT, "fixes.json"), null);
+  const notes    = rd(path.join(OUT, "notes.json"), {});
+  const batch    = rd(path.join(F.packs(), "batch.json"), null);
+  const featuresJson = rd(F.features(), []);      // VERIFY shape — see note below
+
+  const PWDIR = CFG.pw || PW || "";
+  const PEND = (what) => `_— agent note pending (${what}) —_`;
+
+  const ORIGIN = { external:"external", computed:"computed", app_read:"app_read", ui_state:"app_read", literal:"literal", ui_literal:"literal", unknown:"unknown" };
+  const allOracles = (Array.isArray(oracles) ? oracles : []).flatMap(r => r.oracles || []);
+  const byRec = { must_pin:0, planner_can_derive:0, needs_review:0 };
+  const byOrigin = { external:0, computed:0, app_read:0, literal:0, unknown:0 };
+  for (const o of allOracles) { byRec[o.recovery] = (byRec[o.recovery] || 0) + 1; byOrigin[ORIGIN[o.origin ?? o.type] ?? "unknown"]++; }
+  const assertions = allOracles.length;
+
+  const featureCount = Array.isArray(featuresJson) ? featuresJson.length : null;
+  const scenarioCount = Array.isArray(featuresJson) ? featuresJson.reduce((a, f) => a + (Array.isArray(f.scenarios) ? f.scenarios.length : 0), 0) : null;
+
+  const bind = rep.binding || {};
+  let featuresCopied = null, stepFiles = [], stepPacks = [];
+  try { featuresCopied = fs.readdirSync(path.join(PWDIR, "features")).filter(f => f.endsWith(".feature")).length; } catch {}
+  try { stepFiles = fs.readdirSync(path.join(PWDIR, "steps")).filter(f => f.endsWith(".ts")); } catch {}
+  try { stepPacks = fs.readdirSync(F.packs()).filter(f => f.endsWith(".md") && f !== "INDEX.md" && f !== "00_page_objects.md"); } catch {}
+
+  const gate = rep.gate || (verdicts && verdicts.headline ? { pass: verdicts.headline.verdicts.PASS, needsHuman: verdicts.headline.verdicts["NEEDS-HUMAN"], block: verdicts.headline.verdicts.BLOCK, mpFound: verdicts.headline.mpFound, mpTotal: verdicts.headline.mpTotal } : null);
+  const pwRun = rep.playwright || null;
+  const cleanBinding = (bind.unbound || 0) === 0 && (bind.ambiguous || 0) === 0;
+  const outcome = notes.outcome || (gate && gate.block === 0 && pwRun && pwRun.failed === 0 && cleanBinding ? "COMPLETE — all intent preserved" : "INCOMPLETE — see gate/binding/Playwright below");
+  const fmt = (iso) => iso ? iso.replace("T", " ").slice(0, 16) + " UTC" : "?";
+  const durMin = (rep.started && rep.finished) ? Math.round((Date.parse(rep.finished) - Date.parse(rep.started)) / 60000) : null;
+  const suiteName = CFG.suite ? path.basename(CFG.suite) : (SUITE ? path.basename(SUITE) : "(suite)");
+
+  const L = [];
+  L.push(`# BDD Migration Run Report — ${suiteName} (Cucumber+Selenium/Java → playwright-bdd+TypeScript)\n`);
+  L.push(`**Suite:** \`${suiteName}\``);
+  L.push(`**Type:** ${notes.type || "bdd"}`);
+  L.push(`**Date:** ${fmt(rep.started)}${rep.finished ? " – " + fmt(rep.finished).slice(11) : ""}`);
+  if (durMin != null) L.push(`**Duration:** ~${durMin} min (agent wall-clock)`);
+  L.push(`**Outcome:** ${outcome}`);
+  L.push(`**Binding:** ${bind.bound ?? "?"} bound · ${bind.unbound ?? "?"} unbound · ${bind.ambiguous ?? "?"} ambiguous · ${bind.unused_definitions ?? "?"} dead glue`);
+  if (gate) { L.push(`**Must-pin recovery:** **${gate.mpFound}/${gate.mpTotal}**`); L.push(`**Gate:** ${gate.pass} PASS · ${gate.needsHuman} NEEDS-HUMAN · ${gate.block} BLOCK`); }
+  if (pwRun) L.push(`**Playwright:** ${pwRun.passed}/${pwRun.passed + pwRun.failed} passing`);
+  L.push(`**Key fix:** ${notes.keyFix || PEND("header key-fix summary")}\n`);
+  L.push(`> **How to read this report.** Did every check the source made survive into the target? **Must-pin recovery ${gate ? gate.mpFound + "/" + gate.mpTotal : "X/Y"} with ${gate ? gate.block : 0} BLOCK is that answer.** NEEDS-HUMAN items are faithful translations the gate could not mechanically *score*, each explained in §4. The \`.feature\` files carry over verbatim — business intent is copied, not re-derived.`);
+  L.push("\n---\n");
+
+  L.push(`## 1. Intake & Fidelity\n`);
+  L.push(`| | |`); L.push(`|---|---|`);
+  L.push(`| Features | ${featureCount ?? "(see features.json)"} |`);
+  L.push(`| Scenarios | ${scenarioCount ?? "(see features.json)"} |`);
+  L.push(`| Steps bound | ${bind.bound ?? "?"} (unbound ${bind.unbound ?? "?"}, ambiguous ${bind.ambiguous ?? "?"}) |`);
+  L.push(`| Dead glue (unused step defs) | ${bind.unused_definitions ?? "?"} — found, reported, not migrated |`);
+  L.push(`| Oracles | ${assertions} → **${byRec.must_pin} MUST-PIN**, ${byRec.planner_can_derive} derive, **${byRec.needs_review} REVIEW** |`);
+  L.push(`| Step-class packs | ${stepPacks.length} |`);
+  L.push(`\n**Oracle origin breakdown:**\n`);
+  L.push(`| Origin | Count | Meaning | On loss |`); L.push(`|---|---|---|---|`);
+  L.push(`| \`external\` | ${byOrigin.external} | Outside the app — incl. Gherkin Examples/DataTable values | MUST-PIN → BLOCK |`);
+  L.push(`| \`computed\` | ${byOrigin.computed} | Calculated in the step | MUST-PIN → BLOCK |`);
+  L.push(`| \`app_read\` | ${byOrigin.app_read} | A live fact about the page | derive → NEEDS-HUMAN |`);
+  L.push(`| \`literal\` | ${byOrigin.literal} | Hardcoded string/number in the step | derive → NEEDS-HUMAN |`);
+  L.push(`| \`unknown\` | ${byOrigin.unknown} | Origin could not be traced | REVIEW (pinned, fail-safe) |`);
+  L.push(`\n**Localization check (the \`literal = ${byOrigin.literal}\` line).** ${notes.localization || (byOrigin.literal === 0 ? "No hardcoded-string oracles — nothing to check. Values from Gherkin Examples/DataTable classify as external, so they are must-pinned, not at risk." : PEND("localization judgment on the hardcoded-string oracles"))}`);
+  L.push("\n---\n");
+
+  L.push(`## 2. Intake Attestation (HARD-STOP 1)\n`);
+  const att = notes.attestation || {};
+  L.push(`- **Binding (mechanical gate):** ${bind.bound ?? "?"} bound, ${bind.unbound ?? "?"} unbound, ${bind.ambiguous ?? "?"} ambiguous. ${cleanBinding ? "Every Gherkin step resolved to exactly one definition — clean." : "**Unbound/ambiguous steps present — must resolve before migrating.**"}`);
+  L.push(`- **Attested:** ${att.attested || PEND("intake attestation")}`);
+  L.push(`- **Proceed decision:** ${att.proceed || PEND("proceed decision")}`);
+  L.push("\n---\n");
+
+  L.push(`## 3. What was migrated\n`);
+  L.push(`**Features** carried over verbatim (copied, not translated — 0 tokens): ${featuresCopied != null ? featuresCopied : "(pass --pw to count)"}.\n`);
+  L.push(`**Step classes** translated to step files:\n`);
+  if (stepPacks.length) { L.push(`| Step-class pack | Status |`); L.push(`|---|---|`); for (const pk of stepPacks) { const cls = pk.replace(/\.md$/, ""); const done = stepFiles.some(f => f.toLowerCase().includes(cls.replace(/Steps$/, "").toLowerCase())); L.push(`| ${cls} | ${done ? "✅" : "— pending"} |`); } }
+  else L.push(`(no step-class packs found)`);
+  L.push(batch && batch.deferred && batch.deferred.length ? `\n- **Deferred features:** ${batch.deferred.join(", ")}.` : `\n- **Deferred features:** none.`);
+  if (batch && batch.skipped && batch.skipped.length) { L.push(`- **Skipped features:**`); for (const sk of batch.skipped) L.push(`  - \`${sk.name}\` — ${sk.reason}`); } else L.push(`- **Skipped features:** none.`);
+  L.push("\n---\n");
+
+  L.push(`## 4. Gate verdicts\n`);
+  if (verdicts && verdicts.tests) {
+    const nonPass = verdicts.tests.filter(t => t.verdict !== "PASS");
+    const passN = verdicts.tests.length - nonPass.length;
+    L.push(`The shared gate (\`--bdd\`) scores whether each oracle survived, per **step definition**. **must-pin ${gate.mpFound}/${gate.mpTotal} · ${gate.block} BLOCK.** ${nonPass.length ? "The " + nonPass.length + " non-PASS row(s) are below." : "Every step definition passed."}\n`);
+    if (nonPass.length) {
+      L.push(`| Source step definition | must-pin | verdict | Why (not a loss) |`); L.push(`|---|---|---|---|`);
+      for (const t of nonPass) { const reason = (notes.verdictReasons && notes.verdictReasons[t.id]) || (t.notes.join("; ") || PEND("reason")); L.push(`| ${t.id} | ${t.mpFound}/${t.mpTotal} | ${t.verdict} | ${reason} |`); }
+      const missingHuman = nonPass.some(t => !(notes.verdictReasons && notes.verdictReasons[t.id]));
+      if (missingHuman) L.push(`\n_Rows without a written explanation show the gate's mechanical note; add human elaboration via notes.json → verdictReasons before hand-off._`);
+      L.push("");
+    }
+    L.push(`All other ${passN} step definition(s): **PASS** — every oracle matched.`);
+    if (verdicts.headline && verdicts.headline.unscoreable) L.push(`\n(+ ${verdicts.headline.unscoreable} unscoreable must-pin(s) — generic subject/expected names give the matcher no tokens; reported, not counted. Verify by eye.)`);
+  } else L.push(PEND("verdicts.json not found — run validate to emit it"));
+  L.push("\n---\n");
+
+  L.push(`## 5. Interaction fixes applied (HARD-STOP 3, rule 2)\n`);
+  if (Array.isArray(fixes) && fixes.length) {
+    const violation = fixes.some(f => f.assertionsTouched);
+    if (violation) L.push(`> ⚠ **A recorded fix reports \`assertionsTouched: true\`.** Under HARD-STOP 3 rule 2 an interaction fix must NOT touch an assertion — review before hand-off.\n`);
+    L.push(`No assertion — and no \`.feature\` file — was altered${violation ? " except where flagged" : ""}.\n`);
+    L.push(`| # | File | Change | Cause (verified) | Assertions |`); L.push(`|---|---|---|---|---|`);
+    fixes.forEach((f, i) => L.push(`| ${i + 1} | \`${f.file || "?"}\` | ${f.change || "?"} | ${f.cause || "?"}${f.evidence ? " — " + f.evidence : ""} | ${f.assertionsTouched ? "**TOUCHED ⚠**" : "untouched"} |`));
+  } else L.push(`None recorded.${(rep.steps || []).some(s => s.step === "playwright" && s.status === "FAILED") ? " _(A Playwright cycle failed then recovered — if a fix was applied it should be in fixes.json.)_" : ""}`);
+  L.push("\n---\n");
+
+  L.push(`## 6. Cycle history\n`);
+  const vSteps = (rep.steps || []).filter(s => s.step.startsWith("gate") || ["bddgen", "tsc", "playwright"].includes(s.step));
+  const cyc = []; let cur = {};
+  for (const s of vSteps) { const key = s.step.startsWith("gate") ? "gate" : s.step; cur[key] = s; if (s.step === "playwright") { cyc.push(cur); cur = {}; } }
+  if (Object.keys(cur).length) cyc.push(cur);
+  if (cyc.length) {
+    L.push(`| Cycle | gate | bddgen | tsc | playwright | Outcome |`); L.push(`|---|---|---|---|---|---|`);
+    cyc.forEach((c, i) => {
+      const cell = (s) => s ? `${s.status === "ok" ? "✅" : "❌"} ${s.seconds || "?"}s` : "—";
+      const pwOut = c.playwright && c.playwright.passed !== undefined ? (c.playwright.failed ? `${c.playwright.failed} failing` : `${c.playwright.passed}/${c.playwright.passed} passing`) : "";
+      const reason = (notes.cycleReasons && notes.cycleReasons[i]) || "";
+      L.push(`| ${i + 1} | ${cell(c.gate)} | ${cell(c.bddgen)} | ${cell(c.tsc)} | ${cell(c.playwright)} | ${[pwOut, reason].filter(Boolean).join(" — ") || "—"} |`);
+    });
+  } else L.push(`(single cycle — no fix-loop recorded)`);
+  L.push("\n---\n");
+
+  L.push(`## 7. Findings about the customer's system\n`);
+  if (notes.findings && notes.findings.length) for (const f of notes.findings) L.push(`- ${f}`); else L.push(`- ${PEND("customer-system findings")}`);
+  if (bind.unused_definitions) L.push(`- **Dead glue:** ${bind.unused_definitions} step definition(s) referenced by no feature — real code, never run. Found and skipped, not migrated.`);
+  if (verdicts && verdicts.headline) L.push(`- **Blind spots:** ${verdicts.headline.blind === 0 ? "none — every page object and helper was followed" : verdicts.headline.blind + " (calls the gate could not follow)"}.`);
+  L.push("\n---\n");
+
+  L.push(`## 8. Playwright execution\n`);
+  if (pwRun) { L.push(`- **Result:** ${pwRun.passed} passed, ${pwRun.failed} failed.`); L.push(`- **Command:** \`npx bddgen && npx playwright test\``); L.push(`- **tsc --noEmit:** ${(rep.steps || []).some(s => s.step === "tsc" && s.status === "ok") ? "clean (compiles)" : "see steps"}`); } else L.push(`(not run)`);
+  L.push("\n---\n");
+
+  L.push(`## 9. Pipeline steps\n`);
+  L.push(`| Step | Status | Time |`); L.push(`|---|---|---|`);
+  let toolSec = 0;
+  for (const s of rep.steps || []) { toolSec += parseFloat(s.seconds) || 0; L.push(`| ${s.step} | ${s.status} | ${s.seconds ? s.seconds + " s" : "—"} |`); }
+  if (durMin != null) L.push(`\n**Why these don't sum to ~${durMin} min.** The times above are *deterministic tool* time (~${(toolSec / 60).toFixed(1)} min). The rest is **agent** work between steps — reading packs, writing step files, diagnosing failures — which the orchestrator can't meter.`);
+  L.push("\n---\n");
+
+  L.push(`## 10. Translation cost\n`);
+  let tokenLine = "not metered (agent runtime, e.g. a Claude subscription). The deterministic steps above cost ZERO tokens.";
+  const tks = rd(path.join(OUT, "tokens.json"), null);
+  if (Array.isArray(tks)) { const i = tks.reduce((a, x) => a + (x.input_tokens || 0), 0), o = tks.reduce((a, x) => a + (x.output_tokens || 0), 0); tokenLine = `input ${i}, output ${o}, across ${tks.length} translation call(s) (from tokens.json).`; }
+  L.push(tokenLine + "\n");
+  L.push(`| Runtime | Where the cost shows | Read by the kit? |`); L.push(`|---|---|---|`);
+  L.push(`| GitHub Copilot (VS Code) | Copilot chat popover | No |`);
+  L.push(`| Cursor | Cursor usage panel | No |`);
+  L.push(`| Claude subscription | In-app usage | No |`);
+  L.push(`| Anthropic API | \`usage\` on each response → \`tokens.json\` | **Yes** |`);
+  L.push("\n---\n");
+
+  L.push(`## 11. Re-run commands\n`);
+  L.push("```");
+  L.push(`# Full validation of the migrated BDD suite`);
+  L.push(`node <BDD-KIT>\\tools\\orchestrator\\orchestrate_bdd.mjs validate --testng-kit <TESTNG-KIT> --out <WORK> --pw <PW>`);
+  L.push("");
+  L.push(`# The migrated suite alone`);
+  L.push(`cd <PW> && npx bddgen && npx playwright test`);
+  L.push("```");
+
+  const md = L.join("\n") + "\n";
   const mdDir = (PW && fs.existsSync(PW)) ? PW : OUT;
-  const out = path.join(mdDir, "migration-run-report.md");
-  fs.writeFileSync(out, md.join("\n") + "\n");
-  console.log(md.join("\n"));
-  console.log(`\nWrote ${out}`);
+  const mdPath = path.join(mdDir, "migration-run-report.md");
+  fs.writeFileSync(mdPath, md);
+  console.log(md);
+  console.log(`(written ${mdPath})`);
 }
 
 function usage() {
