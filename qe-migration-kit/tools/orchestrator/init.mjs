@@ -241,10 +241,10 @@ if (!has("--no-scaffold")) {
   }, null, 2));
   fs.writeFileSync(path.join(INTO, "playwright.config.ts"), KIND === "bdd"
     ? `import "dotenv/config";   // loads .env into process.env; secrets come from there, never a committed file
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 import { defineBddConfig } from "playwright-bdd";
 
-// The agent may add baseURL / timeouts to match the source suite's config.
+// Baseline config. The agent may add baseURL, more projects, or timeouts to match the source suite.
 const testDir = defineBddConfig({
   features: "features/**/*.feature",
   steps: ["steps/**/*.ts", "fixtures.ts"],   // exactly what agent/CLAUDE.md specifies — do not diverge
@@ -252,16 +252,48 @@ const testDir = defineBddConfig({
 
 export default defineConfig({
   testDir,
-  use: { screenshot: "only-on-failure" },   // replaces the source's screenshot @After hook
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,   // retries only in CI; local runs surface real flakiness for validate
+  workers: 1,                        // serial + deterministic; the agent may raise it once a suite is stable
+  reporter: [["list"], ["html", { open: "never" }]],
+  use: {
+    trace: "on-first-retry",
+    screenshot: "only-on-failure",
+    video: "retain-on-failure",
+    // baseURL: process.env.BASE_URL,  // agent: set to the source's base URL (or put BASE_URL in .env)
+  },
+  // timeout: 30_000,                   // agent: match the source's per-test timeout if it set one
+  // expect: { timeout: 5_000 },        // agent: match the source's assertion timeout if it set one
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    // agent: add firefox / webkit to match the source suite's browser coverage
+  ],
 });
 `
     : `import "dotenv/config";   // loads .env into process.env; secrets come from there, never a committed file
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 
-// The agent may add baseURL / timeouts to match the source suite's config.
+// Baseline config. The agent may add baseURL, more projects, or timeouts to match the source suite.
 export default defineConfig({
   testDir: "./tests",
-  use: { screenshot: "only-on-failure" },
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,   // retries only in CI; local runs surface real flakiness for validate
+  workers: 1,                        // serial + deterministic; the agent may raise it once a suite is stable
+  reporter: [["list"], ["html", { open: "never" }]],
+  use: {
+    trace: "on-first-retry",
+    screenshot: "only-on-failure",
+    video: "retain-on-failure",
+    // baseURL: process.env.BASE_URL,  // agent: set to the source's base URL (or put BASE_URL in .env)
+  },
+  // timeout: 30_000,                   // agent: match the source's per-test timeout if it set one
+  // expect: { timeout: 5_000 },        // agent: match the source's assertion timeout if it set one
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    // agent: add firefox / webkit to match the source suite's browser coverage
+  ],
 });
 `);
 

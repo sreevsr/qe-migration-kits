@@ -28,7 +28,7 @@ not to re-derive what to test.
   the same way; never freeze a computation to a literal). Preserve exact characters (e.g. curly
   quotes `“ ”`) — the live app may match on them.
 - **Data providers → parameterized tests:** `@Test(dataProvider=...)` with N rows → a loop that
-  emits one `test()` per row, each with its own `page` (do not share one session across rows).
+  emits one `test()` per row, each with its own `page` (do not share one session across rows). Test data files → a `test-data/` folder at the project root (not inside `tests/`), read relative to root.
 - **API-driven setup → Playwright request context:** RestAssured calls → `request.post(url,{form,
   headers})` via `APIRequestContext`; Jackson (de)serialize → plain JS/JSON; cookie injection →
   `context.addCookies(...)` before `page.goto`; keep distinct request contexts if the Java used

@@ -53,6 +53,9 @@ Use Playwright's `expect`. Map by intent, and **every MUST-PIN oracle must appea
 A `@Test(dataProvider=...)` with N rows → a `for (const row of ROWS) test(\`...${row}\`, ...)`
 loop that emits **one `test()` per row**, each with its own `page` — do NOT run all rows in one
 shared session (that loses per-row isolation; the gate flags it as a data-row-loop smell).
+- **Test data files** the source read from resources (CSV/JSON/Excel/text): copy them into a
+  `test-data/` folder at the PROJECT ROOT — alongside `tests/`, not nested inside it — and read
+  them by a path relative to the project root.
 
 ## 7. API-driven setup → Playwright request context
 Some suites set up state via REST (RestAssured) then inject cookies. Translate:
