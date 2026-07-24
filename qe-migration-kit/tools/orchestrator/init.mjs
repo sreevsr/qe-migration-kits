@@ -213,7 +213,7 @@ if (EDITOR === "copilot") {
   console.log(`  \u2713 .cursor/rules`);
 } else {
   fs.copyFileSync(path.join(agentDir, "CLAUDE.md"), path.join(INTO, "CLAUDE.md"));
-  const cp = (src, dst) => { fs.mkdirSync(path.dirname(dst), { recursive: true });
+  const cp = (src, dst) => { fs.mkdirSync(dst, { recursive: true });
     for (const e of fs.readdirSync(src, { withFileTypes: true }))
       e.isDirectory() ? cp(path.join(src, e.name), path.join(dst, e.name))
                       : fs.copyFileSync(path.join(src, e.name), path.join(dst, e.name)); };
