@@ -60,7 +60,7 @@ Some suites set up state via REST (RestAssured) then inject cookies. Translate:
 | `RestAssured.given()...post(url)` / `CartApi.addToCart(...)` | `const res = await request.post(url, { data, headers })` using `APIRequestContext` |
 | `JacksonUtils.deserialize/serialize` | plain JS objects / `JSON.parse` / `JSON.stringify` |
 | `injectCookiesToBrowser(cookies)` | `await context.addCookies(cookiesArray)` before `page.goto` |
-- Read the base URL / credentials from config, don't hard-code. Keep the API calls as setup in a
+- Read the base URL / credentials from `process.env` (see §10), never a hard-coded literal. Keep the API calls as setup in a
   `beforeEach` or a fixture, mirroring the Java `@BeforeMethod`.
 - **TLS / certificate validation (fidelity rule — conditional, and must be reported):** add
   `ignoreHTTPSErrors: true` to a Playwright request context ONLY IF the Java source deliberately
@@ -83,3 +83,19 @@ Some suites set up state via REST (RestAssured) then inject cookies. Translate:
 - Do not drop a MUST-PIN oracle (the gate BLOCKs).
 - Do not freeze a computed value to a literal.
 - Do not add explicit sleeps/waits.
+- Do not write a secret value into any committed file (see §10).
+
+## 10. Secrets & environment config — from process.env, never a committed file
+Credentials, tokens, and base URLs are ENVIRONMENT config, not code. The kit scaffolds the
+pattern (a gitignored `.env`, `dotenv` loaded in `playwright.config.ts`); use it — do not invent
+a place for secrets.
+- Read every credential/token/secret from `process.env.X`. NEVER write a secret value into a
+  committed file — not `config.ts`, not a spec, not `playwright.config.ts`. A literal secret in a
+  tracked file is the defect this rule exists to prevent.
+- For each secret the source uses, add its KEY (no value) to `.env.example` so the next person
+  knows what to set. `.env.example` is committed; `.env` holds the real values and is gitignored.
+- A hard-coded fallback is allowed ONLY for values that are genuinely public and non-sensitive
+  (e.g. a demo suite's public login): `process.env.SAUCE_USERNAME ?? "standard_user"`. Never fall
+  back to a real credential.
+- Non-secret config (baseURL, timeouts) may live in `playwright.config.ts`. A `config.ts` is fine
+  ONLY if it reads from `process.env` — never if it holds literal secrets.

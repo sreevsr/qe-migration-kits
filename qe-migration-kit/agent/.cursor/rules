@@ -52,7 +52,7 @@ require anyone to retype an absolute path.
    re-install, and do NOT rewrite `playwright.config.ts`. If you need something extra (a `baseURL`
    from the source config, a timeout), ADD it — don't replace the file.
    Only if <PW> has NO package.json (the older manual flow) do you scaffold it yourself:
-   `npm init -y && npm i -D @playwright/test typescript @types/node && npx playwright install`
+   `npm init -y && npm i -D @playwright/test dotenv typescript @types/node && npx playwright install`
    **If an npm install fails on a CERTIFICATE error** (`self signed certificate in certificate
    chain`, `UNABLE_TO_VERIFY_LEAF_SIGNATURE`), that is a corporate TLS-inspecting proxy: its root CA
    is in the machine's trust store, which Node does not consult by default. It is NOT a kit problem
@@ -272,6 +272,10 @@ not to re-derive what to test.
   headers})` via `APIRequestContext`; Jackson (de)serialize → plain JS/JSON; cookie injection →
   `context.addCookies(...)` before `page.goto`; keep distinct request contexts if the Java used
   distinct cookie jars.
+- **Secrets & config:** credentials, tokens, and base URLs come from `process.env.X` — NEVER
+  write a secret into a committed file (`config.ts`, a spec, or `playwright.config.ts`). Add each
+  key (no value) to `.env.example`; a hard-coded fallback is allowed only for genuinely public
+  values (e.g. a demo login). Full rule: contract §10.
 - **TLS (conditional, reported):** add `ignoreHTTPSErrors: true` to a request context ONLY if the
   source relaxed cert validation (RestAssured default, `relaxedHTTPSValidation()`, trust-all SSL) —
   this mirrors source behavior. Report it as a deliberate fidelity choice. If the source verified

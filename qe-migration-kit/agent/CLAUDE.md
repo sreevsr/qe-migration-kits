@@ -52,7 +52,7 @@ require anyone to retype an absolute path.
    re-install, and do NOT rewrite `playwright.config.ts`. If you need something extra (a `baseURL`
    from the source config, a timeout), ADD it — don't replace the file.
    Only if <PW> has NO package.json (the older manual flow) do you scaffold it yourself:
-   `npm init -y && npm i -D @playwright/test typescript @types/node && npx playwright install`
+   `npm init -y && npm i -D @playwright/test dotenv typescript @types/node && npx playwright install`
    **If an npm install fails on a CERTIFICATE error** (`self signed certificate in certificate
    chain`, `UNABLE_TO_VERIFY_LEAF_SIGNATURE`), that is a corporate TLS-inspecting proxy: its root CA
    is in the machine's trust store, which Node does not consult by default. It is NOT a kit problem

@@ -186,7 +186,20 @@ node_modules/
 test-results/
 playwright-report/
 cp.txt
+
+# secrets: real credential values live here, never committed. .env.example (committed) lists the keys.
+.env
 `);
+fs.writeFileSync(path.join(INTO, ".env.example"),
+`# Copy this file to .env and fill in real values. .env is gitignored; .env.example (keys only) is committed.
+# The agent lists the keys the source suite actually needs. In code, read them via process.env.<KEY>.
+#
+# Examples (replace with the suite's real keys — real secrets get NO default in code):
+# BASE_URL=
+# APP_USERNAME=
+# APP_PASSWORD=
+`);
+console.log(`  \u2713 .env.example  \u2014 keys the migrated suite reads from process.env (.env is gitignored)`);
 
 // ---- 8. drop in the instruction file ---------------------------------------------------------
 const agentDir = path.join(KIT, "agent");
@@ -212,8 +225,8 @@ if (EDITOR === "copilot") {
 if (!has("--no-scaffold")) {
   console.log(`\n  \u2026 scaffolding the Playwright project`);
   const deps = KIND === "bdd"
-    ? "@playwright/test playwright-bdd typescript @types/node"
-    : "@playwright/test typescript @types/node";
+    ? "@playwright/test playwright-bdd dotenv typescript @types/node"
+    : "@playwright/test dotenv typescript @types/node";
   fs.writeFileSync(path.join(INTO, "package.json"), JSON.stringify({
     name: path.basename(INTO).toLowerCase().replace(/[^a-z0-9-]/g, "-"),
     private: true, type: "module", scripts: KIND === "bdd"
@@ -227,7 +240,8 @@ if (!has("--no-scaffold")) {
       skipLibCheck: true, noEmit: true, types: ["node"] },
   }, null, 2));
   fs.writeFileSync(path.join(INTO, "playwright.config.ts"), KIND === "bdd"
-    ? `import { defineConfig } from "@playwright/test";
+    ? `import "dotenv/config";   // loads .env into process.env; secrets come from there, never a committed file
+import { defineConfig } from "@playwright/test";
 import { defineBddConfig } from "playwright-bdd";
 
 // The agent may add baseURL / timeouts to match the source suite's config.
@@ -241,7 +255,8 @@ export default defineConfig({
   use: { screenshot: "only-on-failure" },   // replaces the source's screenshot @After hook
 });
 `
-    : `import { defineConfig } from "@playwright/test";
+    : `import "dotenv/config";   // loads .env into process.env; secrets come from there, never a committed file
+import { defineConfig } from "@playwright/test";
 
 // The agent may add baseURL / timeouts to match the source suite's config.
 export default defineConfig({

@@ -33,6 +33,10 @@ not to re-derive what to test.
   headers})` via `APIRequestContext`; Jackson (de)serialize → plain JS/JSON; cookie injection →
   `context.addCookies(...)` before `page.goto`; keep distinct request contexts if the Java used
   distinct cookie jars.
+- **Secrets & config:** credentials, tokens, and base URLs come from `process.env.X` — NEVER
+  write a secret into a committed file (`config.ts`, a spec, or `playwright.config.ts`). Add each
+  key (no value) to `.env.example`; a hard-coded fallback is allowed only for genuinely public
+  values (e.g. a demo login). Full rule: contract §10.
 - **TLS (conditional, reported):** add `ignoreHTTPSErrors: true` to a request context ONLY if the
   source relaxed cert validation (RestAssured default, `relaxedHTTPSValidation()`, trust-all SSL) —
   this mirrors source behavior. Report it as a deliberate fidelity choice. If the source verified
